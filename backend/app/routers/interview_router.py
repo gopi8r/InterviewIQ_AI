@@ -7,13 +7,13 @@ Candidate-facing interview endpoints (all require a valid JWT):
                                                    configured question_limit)
   POST /api/interview/session/{id}/answer        - upload one recorded audio
                                                    answer (Whisper transcribes it)
-  POST /api/interview/session/{id}/evaluate       - scores all answers with Gemini
+  POST /api/interview/session/{id}/evaluate       - scores all answers with Groq
                                                    and returns ONLY a submission
                                                    confirmation (no scores/PDF -
                                                    results are admin-only, see
                                                    admin_router.py)
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
@@ -41,6 +41,9 @@ def start_session(db: Session = Depends(get_db), current_user: models.User = Dep
         experience_years=current_user.experience_years or 0,
         count=question_limit,
     )
+
+    if not generated:
+        raise HTTPException(status_code=500, detail="Could not generate interview questions")
 
     session = models.InterviewSession(user_id=current_user.id, question_count=len(generated))
     db.add(session)
@@ -87,6 +90,9 @@ async def submit_answer(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     session = _get_owned_session(db, session_id, current_user)
+    if session.completed_at is not None:
+        raise HTTPException(status_code=400, detail="This interview has already been submitted")
+
     sq = (
         db.query(models.SessionQuestion)
         .filter(models.SessionQuestion.session_id == session.id, models.SessionQuestion.question_index == question_index)
@@ -145,9 +151,18 @@ def evaluate_session(
         for ans in sorted_answers
     ]
 
-    # ONE Gemini call scores every answer in this session (instead of one
-    # call per answer) - keeps daily quota usage low on the free tier.
-    results = groq_service.score_batch(batch_items)
+    try:
+        # ONE Groq call scores every answer in this session (instead of one
+        # call per answer) - keeps daily quota usage low on the free tier.
+        results = groq_service.score_batch(batch_items)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Interview evaluation failed for session %s", session_id)
+        raise HTTPException(status_code=502, detail="Could not evaluate interview at this time") from exc
+
+    if len(results) != len(sorted_answers):
+        db.rollback()
+        raise HTTPException(status_code=502, detail="Interview evaluation returned an unexpected result count")
 
     technical_scores, communication_scores = [], []
     for ans, result in zip(sorted_answers, results):
@@ -167,9 +182,14 @@ def evaluate_session(
     session.avg_communication_score = round(avg_communication, 1)
     session.overall_score = overall
     session.verdict = _get_verdict(overall)
-    session.completed_at = datetime.utcnow()
+    session.completed_at = _ist_now()
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Failed to persist evaluation result for session %s", session_id)
+        raise HTTPException(status_code=500, detail="Could not save interview results") from exc
 
     # Candidate never sees scores or a PDF - just a confirmation.
     # Results are only visible to admins via /api/admin/candidates/*
@@ -193,6 +213,10 @@ def _get_owned_session(db: Session, session_id: int, user: models.User, with_ans
     if session.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not your interview session")
     return session
+
+
+def _ist_now() -> datetime:
+    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=5, minutes=30))).replace(tzinfo=None)
 
 
 def _get_verdict(score: float) -> str:

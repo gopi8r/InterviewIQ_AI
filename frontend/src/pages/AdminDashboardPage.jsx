@@ -21,6 +21,32 @@ function verdictClass(verdict) {
   }
 }
 
+function formatIstDateTime(value) {
+  if (!value) return "—";
+
+  let date;
+  if (value instanceof Date) {
+    date = value;
+  } else if (typeof value === "string") {
+    const trimmed = value.trim();
+    const hasTimeZone = /[zZ]|[+-]\d{2}:\d{2}$/.test(trimmed);
+    const normalized = hasTimeZone ? trimmed : trimmed.replace(" ", "T");
+    date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) {
+      date = new Date(`${normalized}+05:30`);
+    }
+  } else {
+    date = new Date(value);
+  }
+
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 export default function AdminDashboardPage() {
   const navigate = useNavigate();
   const { token, logout } = useAdminAuth();
@@ -38,6 +64,7 @@ export default function AdminDashboardPage() {
 
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
 
   const [bulkStart, setBulkStart] = useState("");
   const [bulkEnd, setBulkEnd] = useState("");
@@ -80,6 +107,9 @@ export default function AdminDashboardPage() {
 
   async function loadCandidates(pageNum, searchTerm) {
     setLoadError("");
+    setSelectedSessionId(null);
+    setDetail(null);
+    setDetailLoading(false);
     try {
       const data = await adminListCandidates(token, { page: pageNum, pageSize, search: searchTerm });
       setCandidates(data.items);
@@ -107,6 +137,13 @@ export default function AdminDashboardPage() {
   }
 
   async function viewDetail(sessionId) {
+    if (selectedSessionId === sessionId && detail) {
+      setSelectedSessionId(null);
+      setDetail(null);
+      return;
+    }
+
+    setSelectedSessionId(sessionId);
     setDetailLoading(true);
     setDetail(null);
     try {
@@ -117,6 +154,12 @@ export default function AdminDashboardPage() {
     } finally {
       setDetailLoading(false);
     }
+  }
+
+  function handleCloseDetail() {
+    setSelectedSessionId(null);
+    setDetail(null);
+    setDetailLoading(false);
   }
 
   async function handleDownloadOne(sessionId, candidateName) {
@@ -253,30 +296,80 @@ export default function AdminDashboardPage() {
             <tbody>
               {candidates.map((c) => {
                 const isPending = c.verdict === "Pending" || !c.completed_at;
+                const isSelected = selectedSessionId === c.session_id;
                 const dateLabel = c.completed_at
-                  ? new Date(c.completed_at).toLocaleDateString()
-                  : new Date(c.started_at).toLocaleDateString() + " (in progress)";
+                  ? formatIstDateTime(c.completed_at)
+                  : `${formatIstDateTime(c.started_at)} (in progress)`;
                 return (
-                  <tr key={c.session_id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{c.candidate_name}</div>
-                      <div style={{ color: "#888", fontSize: 12 }}>{c.candidate_email}</div>
-                    </td>
-                    <td>{num(c.experience_years)} yrs</td>
-                    <td>
-                      {(c.skills || []).map((s) => (
-                        <span key={s} className="skills-chip">{s}</span>
-                      ))}
-                    </td>
-                    <td style={{ fontWeight: 600 }}>{num(c.overall_score).toFixed(1)}</td>
-                    <td><span className={`verdict-badge ${verdictClass(c.verdict)}`}>{c.verdict || "Pending"}</span></td>
-                    <td style={{ color: "#888", fontSize: 12.5 }}>{dateLabel}</td>
-                    <td>
-                      <button className="btn btn-outline btn-sm" disabled={isPending} onClick={() => viewDetail(c.session_id)}>
-                        View
-                      </button>
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={c.session_id}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{c.candidate_name}</div>
+                        <div style={{ color: "#888", fontSize: 12 }}>{c.candidate_email}</div>
+                      </td>
+                      <td>{num(c.experience_years)} yrs</td>
+                      <td>
+                        {(c.skills || []).map((s) => (
+                          <span key={s} className="skills-chip">{s}</span>
+                        ))}
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{num(c.overall_score).toFixed(1)}</td>
+                      <td><span className={`verdict-badge ${verdictClass(c.verdict)}`}>{c.verdict || "Pending"}</span></td>
+                      <td style={{ color: "#888", fontSize: 12.5 }}>{dateLabel}</td>
+                      <td>
+                        <button className="btn btn-outline btn-sm" disabled={isPending} onClick={() => viewDetail(c.session_id)}>
+                          {isSelected && detailLoading ? "Loading..." : "View"}
+                        </button>
+                      </td>
+                    </tr>
+                    {isSelected && (
+                      <tr key={`${c.session_id}-detail`}>
+                        <td colSpan={7}>
+                          {detailLoading ? (
+                            <div className="detail-panel" style={{ margin: "8px 0", textAlign: "center" }}>
+                              <div className="spinner" />
+                            </div>
+                          ) : detail ? (
+                            <div className="detail-panel" style={{ margin: "8px 0" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                                <div>
+                                  <h5 style={{ margin: 0 }}>{detail.candidate_name}</h5>
+                                  <div style={{ color: "#888", fontSize: 13 }}>{detail.candidate_email}</div>
+                                </div>
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button className="btn btn-outline btn-sm" onClick={handleCloseDetail}>Close</button>
+                                  <button className="btn btn-brand btn-sm" onClick={() => handleDownloadOne(detail.session_id, detail.candidate_name)}>
+                                    ⬇ Download PDF
+                                  </button>
+                                </div>
+                              </div>
+                              <div style={{ display: "flex", gap: 24, marginBottom: 16 }}>
+                                <div><strong>Overall:</strong> {num(detail.overall_score).toFixed(1)}/10</div>
+                                <div><strong>Technical:</strong> {num(detail.avg_technical_score).toFixed(1)}/10</div>
+                                <div><strong>Communication:</strong> {num(detail.avg_communication_score).toFixed(1)}/10</div>
+                              </div>
+                              {detail.answers.map((a, idx) => (
+                                <div key={idx} className="qa-block">
+                                  <div style={{ fontWeight: 600 }}>Q{idx + 1}. {a.question_text}</div>
+                                  <div className="qa-scores">
+                                    Technical: {num(a.technical_score).toFixed(1)}/10 · Communication: {num(a.communication_score).toFixed(1)}/10
+                                    · {num(a.words_per_minute)} wpm · {num(a.time_taken_seconds)}s
+                                  </div>
+                                  <div>{a.feedback}</div>
+                                  {a.missed_concepts.length > 0 && (
+                                    <div className="qa-missed">Missed: {a.missed_concepts.join("; ")}</div>
+                                  )}
+                                  <div style={{ color: "#888", fontSize: 12.5, marginTop: 8 }}>
+                                    <i>Transcript:</i> "{a.transcript}"
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>
@@ -297,49 +390,6 @@ export default function AdminDashboardPage() {
           </div>
         )}
 
-        {/* Detail panel */}
-        {detailLoading && (
-          <div className="detail-panel" style={{ marginTop: 24, textAlign: "center" }}>
-            <div className="spinner" />
-          </div>
-        )}
-        {detail && !detailLoading && (
-          <div className="detail-panel" style={{ marginTop: 24 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-              <div>
-                <h5 style={{ margin: 0 }}>{detail.candidate_name}</h5>
-                <div style={{ color: "#888", fontSize: 13 }}>{detail.candidate_email}</div>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-outline btn-sm" onClick={() => setDetail(null)}>Close</button>
-                <button className="btn btn-brand btn-sm" onClick={() => handleDownloadOne(detail.session_id, detail.candidate_name)}>
-                  ⬇ Download PDF
-                </button>
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 24, marginBottom: 16 }}>
-              <div><strong>Overall:</strong> {num(detail.overall_score).toFixed(1)}/10</div>
-              <div><strong>Technical:</strong> {num(detail.avg_technical_score).toFixed(1)}/10</div>
-              <div><strong>Communication:</strong> {num(detail.avg_communication_score).toFixed(1)}/10</div>
-            </div>
-            {detail.answers.map((a, idx) => (
-              <div key={idx} className="qa-block">
-                <div style={{ fontWeight: 600 }}>Q{idx + 1}. {a.question_text}</div>
-                <div className="qa-scores">
-                  Technical: {num(a.technical_score).toFixed(1)}/10 · Communication: {num(a.communication_score).toFixed(1)}/10
-                  · {num(a.words_per_minute)} wpm · {num(a.time_taken_seconds)}s
-                </div>
-                <div>{a.feedback}</div>
-                {a.missed_concepts.length > 0 && (
-                  <div className="qa-missed">Missed: {a.missed_concepts.join("; ")}</div>
-                )}
-                <div style={{ color: "#888", fontSize: 12.5, marginTop: 8 }}>
-                  <i>Transcript:</i> "{a.transcript}"
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

@@ -12,7 +12,7 @@ Admin-only endpoints (require role == admin, enforced by auth.get_current_admin)
                                                a given date range
 """
 from io import BytesIO
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from zipfile import ZipFile
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -68,6 +68,13 @@ def list_candidates(
 ):
     query = db.query(models.InterviewSession).options(joinedload(models.InterviewSession.user))
 
+    query = query.filter(
+        or_(
+            models.InterviewSession.completed_at.isnot(None),
+            models.InterviewSession.overall_score.isnot(None),
+        )
+    )
+
     if search.strip():
         like = f"%{search.strip()}%"
         query = query.join(models.User).filter(
@@ -112,8 +119,10 @@ def download_bulk_reports(
             joinedload(models.InterviewSession.answers).joinedload(models.Answer.session_question),
         )
         .filter(
-            models.InterviewSession.completed_at.isnot(None),
-            models.InterviewSession.overall_score.isnot(None),
+            or_(
+                models.InterviewSession.completed_at.isnot(None),
+                models.InterviewSession.overall_score.isnot(None),
+            ),
             models.InterviewSession.completed_at >= start_datetime,
             models.InterviewSession.completed_at <= end_datetime,
         )
@@ -153,6 +162,9 @@ def get_candidate_detail(
     session_id: int, db: Session = Depends(get_db), _admin: models.User = Depends(auth.get_current_admin)
 ):
     session = _get_session_or_404(db, session_id)
+    if not _is_completed_evaluated_session(session):
+        raise HTTPException(status_code=400, detail="This candidate has not completed evaluation yet")
+
     summary = _session_to_summary(session)
     sorted_answers = sorted(session.answers, key=lambda a: a.session_question.question_index)
     summary["answers"] = [
@@ -178,7 +190,7 @@ def download_candidate_report(
     session_id: int, db: Session = Depends(get_db), _admin: models.User = Depends(auth.get_current_admin)
 ):
     session = _get_session_or_404(db, session_id)
-    if session.overall_score is None:
+    if not _is_completed_evaluated_session(session):
         raise HTTPException(status_code=400, detail="This candidate has not completed evaluation yet")
 
     pdf_bytes = pdf_service.generate_report_pdf(session)
@@ -207,6 +219,18 @@ def _get_session_or_404(db: Session, session_id: int) -> models.InterviewSession
     return session
 
 
+def _is_completed_evaluated_session(session: models.InterviewSession) -> bool:
+    return session.overall_score is not None and (session.completed_at is not None or session.overall_score is not None)
+
+
+def _to_ist_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    return value.astimezone(timezone(timedelta(hours=5, minutes=30)))
+
+
 def _session_to_summary(session: models.InterviewSession) -> dict:
     # Defensive: always return numeric 0 instead of None for scores, so the
     # frontend never has to guard against null and never throws trying to
@@ -218,8 +242,8 @@ def _session_to_summary(session: models.InterviewSession) -> dict:
         "candidate_email": session.user.email,
         "experience_years": session.user.experience_years or 0,
         "skills": session.user.skills or [],
-        "started_at": session.started_at,
-        "completed_at": session.completed_at,
+        "started_at": _to_ist_datetime(session.started_at),
+        "completed_at": _to_ist_datetime(session.completed_at or session.started_at),
         "overall_score": session.overall_score if session.overall_score is not None else 0.0,
         "avg_technical_score": session.avg_technical_score if session.avg_technical_score is not None else 0.0,
         "avg_communication_score": session.avg_communication_score if session.avg_communication_score is not None else 0.0,

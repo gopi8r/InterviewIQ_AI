@@ -100,7 +100,8 @@ export default function TestPage() {
     if (!recording) {
       await startRecording();
     } else {
-      stopRecordingAndSubmit(false);
+      // When already recording, use the same button to submit the answer
+      await submitCurrentAnswer();
     }
   }
 
@@ -179,6 +180,24 @@ export default function TestPage() {
     }
   }
 
+  async function skipQuestion() {
+    clearInterval(timerIntervalRef.current);
+    if (recording) {
+      await stopRecorderAndWait();
+    }
+    setRecording(false);
+    setCanRecord(false);
+    setCanSubmit(false);
+    setAvatarState("idle");
+
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < questions.length) {
+      setCurrentIndex(nextIndex);
+    } else {
+      finishInterview();
+    }
+  }
+
   async function finishInterview() {
     setPhase("evaluating");
     try {
@@ -251,11 +270,19 @@ export default function TestPage() {
               </div>
 
               <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-                <button className="btn btn-brand" disabled={!canRecord} onClick={handleToggleRecording}>
-                  {recording ? "⏹ Stop Answer" : "🎙️ Start Answer"}
+                <button
+                  className="btn btn-brand"
+                  disabled={!canRecord && !recording}
+                  onClick={handleToggleRecording}
+                >
+                  {recording ? "✅ Submit & Next ➜" : "🎙️ Start Answer"}
                 </button>
-                <button className="btn btn-outline" disabled={!canSubmit} onClick={() => stopRecordingAndSubmit(false)}>
-                  Submit & Next ➜
+                <button
+                  className="btn btn-outline"
+                  disabled={!q}
+                  onClick={skipQuestion}
+                >
+                  Skip Question ➜
                 </button>
               </div>
             </>

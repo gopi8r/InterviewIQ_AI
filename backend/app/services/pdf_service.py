@@ -3,7 +3,7 @@ PDF scorecard generation using ReportLab. Only ever called from the admin
 router - candidates never see this.
 """
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -44,7 +44,7 @@ def generate_report_pdf(session: models.InterviewSession) -> bytes:
     elements = []
 
     elements.append(Paragraph("AI Technical Interview Report", title_style))
-    elements.append(Paragraph(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", small))
+    elements.append(Paragraph(f"Generated: {_ist_now().strftime('%Y-%m-%d %H:%M IST')}", small))
     elements.append(Spacer(1, 14))
 
     if isinstance(candidate.skills, (list, tuple, set)):
@@ -109,3 +109,7 @@ def generate_report_pdf(session: models.InterviewSession) -> bytes:
     doc.build(elements)
     buffer.seek(0)
     return buffer.read()
+
+
+def _ist_now() -> datetime:
+    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=5, minutes=30))).replace(tzinfo=None)

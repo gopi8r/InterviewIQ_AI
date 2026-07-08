@@ -11,7 +11,7 @@ session_questions   : the AI-generated questions for one specific session
                       skills + experience - NOT a shared static question bank)
 answers             : one row per answered question within a session
 """
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import enum
 
 from sqlalchemy import (
@@ -20,6 +20,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _ist_now() -> datetime:
+    return datetime.now(IST).replace(tzinfo=None)
 
 
 class UserRole(str, enum.Enum):
@@ -40,7 +46,7 @@ class User(Base):
     experience_years = Column(Integer, nullable=True)
     skills = Column(JSON, nullable=True)  # list[str], e.g. ["Java", "Spring Boot", "MySQL"]
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_ist_now)
 
     sessions = relationship("InterviewSession", back_populates="user")
 
@@ -51,7 +57,7 @@ class AdminSettings(Base):
 
     id = Column(Integer, primary_key=True, default=1)
     question_limit = Column(Integer, default=5, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=_ist_now, onupdate=_ist_now)
 
 
 class InterviewSession(Base):
@@ -59,7 +65,7 @@ class InterviewSession(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    started_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, default=_ist_now)
     completed_at = Column(DateTime, nullable=True)
 
     question_count = Column(Integer, nullable=False)  # how many questions this session used

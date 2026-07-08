@@ -75,7 +75,7 @@ export default function LoginRegisterPage() {
 
   return (
     <div className="page-shell">
-      <div style={{ maxWidth: 640, width: "100%" }}>
+      <div style={{ maxWidth: 540, width: "100%" }}>
         <div className="brand-bar">
           <div className="logo-badge">🧑‍💻</div>
           <div>
