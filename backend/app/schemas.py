@@ -105,3 +105,5 @@ class PaginatedCandidates(BaseModel):
     page: int
     page_size: int
     total_pages: int
+    average_overall_score: float
+    total_hires: int

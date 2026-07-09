@@ -60,6 +60,8 @@ export default function AdminDashboardPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [pageSize] = useState(10);
   const [search, setSearch] = useState("");
+  const [allAvgScore, setAllAvgScore] = useState(0.0);
+  const [totalHires, setTotalHires] = useState(0);
   const [loadError, setLoadError] = useState("");
 
   const [detail, setDetail] = useState(null);
@@ -77,9 +79,12 @@ export default function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    loadCandidates(1, search);
+    const timer = setTimeout(() => {
+      loadCandidates(1, search);
+    }, 250);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [search]);
 
   async function loadSettings() {
     try {
@@ -116,6 +121,8 @@ export default function AdminDashboardPage() {
       setTotal(data.total);
       setPage(data.page);
       setTotalPages(data.total_pages);
+      setAllAvgScore(data.average_overall_score ?? 0.0);
+      setTotalHires(data.total_hires ?? 0);
     } catch (err) {
       // Defensive: show an inline message, never a raw alert popup for a
       // simple "no data" or fetch hiccup.
@@ -196,10 +203,8 @@ export default function AdminDashboardPage() {
   }
 
   const scoredCandidates = candidates.filter((c) => c.verdict !== "Pending");
-  const avgScoreDisplay = scoredCandidates.length
-    ? (scoredCandidates.reduce((sum, c) => sum + num(c.overall_score), 0) / scoredCandidates.length).toFixed(1)
-    : "0.0";
-  const hiresCount = candidates.filter((c) => c.verdict === "Hire" || c.verdict === "Strong Hire").length;
+  const avgScoreDisplay = allAvgScore.toFixed(1);
+  const hiresCount = totalHires;
 
   return (
     <div className="page-shell">
@@ -221,15 +226,15 @@ export default function AdminDashboardPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
           <div className="stat-card">
             <div className="stat-value">{total}</div>
-            <div className="stat-label">Total Interviews (this page's data)</div>
+            <div className="stat-label">Total Interviews</div>
           </div>
           <div className="stat-card">
             <div className="stat-value">{avgScoreDisplay}</div>
-            <div className="stat-label">Avg Overall Score</div>
+            <div className="stat-label">Avg Overall Score (all pages)</div>
           </div>
           <div className="stat-card">
             <div className="stat-value">{hiresCount}</div>
-            <div className="stat-label">Hire / Strong Hire (this page)</div>
+            <div className="stat-label">Hire / Strong Hire (all pages)</div>
           </div>
         </div>
 

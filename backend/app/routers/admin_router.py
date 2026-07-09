@@ -82,6 +82,9 @@ def list_candidates(
         )
 
     total = query.count()
+    total_hires = query.filter(models.InterviewSession.verdict.in_(["Hire", "Strong Hire"])).count()
+    average_overall_score = query.with_entities(func.avg(models.InterviewSession.overall_score)).scalar() or 0.0
+
     sessions = (
         query.order_by(models.InterviewSession.started_at.desc())
         .offset((page - 1) * page_size)
@@ -95,6 +98,8 @@ def list_candidates(
         "page": page,
         "page_size": page_size,
         "total_pages": max(1, (total + page_size - 1) // page_size),
+        "average_overall_score": float(average_overall_score),
+        "total_hires": total_hires,
     }
 
 
