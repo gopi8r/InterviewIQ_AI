@@ -8,7 +8,7 @@ backend/app/**/__pycache__/
 # Secrets - never commit
 backend/.env
 backend/.env.example
-backend/app/config.py
+
 
 # Node / React
 frontend/node_modules/
