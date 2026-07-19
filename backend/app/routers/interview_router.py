@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
@@ -121,6 +121,52 @@ async def submit_answer(
         "question_index": question_index,
         "transcript": transcript,
         "time_taken_seconds": time_taken_seconds,
+    }
+
+
+@router.post("/session/{session_id}/answer/skip", response_model=schemas.AnswerUploadOut)
+def skip_answer(
+    session_id: int,
+    question_index: int = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    session = _get_owned_session(db, session_id, current_user)
+    if session.completed_at is not None:
+        raise HTTPException(status_code=400, detail="This interview has already been submitted")
+
+    sq = (
+        db.query(models.SessionQuestion)
+        .filter(models.SessionQuestion.session_id == session.id, models.SessionQuestion.question_index == question_index)
+        .first()
+    )
+    if not sq:
+        raise HTTPException(status_code=404, detail="Question not found for this session")
+
+    existing_answer = (
+        db.query(models.Answer)
+        .filter(models.Answer.session_question_id == sq.id)
+        .first()
+    )
+    if existing_answer:
+        raise HTTPException(status_code=400, detail="Answer already exists for this question")
+
+    answer = models.Answer(
+        session_id=session.id,
+        session_question_id=sq.id,
+        transcript="",
+        time_taken_seconds=0,
+        words_per_minute=0,
+        filler_word_count=0,
+        filler_rate_percent=0.0,
+    )
+    db.add(answer)
+    db.commit()
+
+    return {
+        "question_index": question_index,
+        "transcript": "",
+        "time_taken_seconds": 0,
     }
 
 

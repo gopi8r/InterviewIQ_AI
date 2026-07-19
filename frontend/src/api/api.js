@@ -79,6 +79,12 @@ export function submitAnswer(token, sessionId, { questionIndex, timeTakenSeconds
   });
 }
 
+export function skipQuestion(token, sessionId, questionIndex) {
+  return request(`/api/interview/session/${sessionId}/answer/skip`, {
+    method: "POST", token, body: { question_index: questionIndex },
+  });
+}
+
 export function evaluateSession(token, sessionId) {
   return request(`/api/interview/session/${sessionId}/evaluate`, { method: "POST", token });
 }

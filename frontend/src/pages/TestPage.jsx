@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import { startSession, submitAnswer, evaluateSession } from "../api/api.js";
+import { startSession, submitAnswer, evaluateSession, skipQuestion as skipQuestionApi } from "../api/api.js";
 
 const AVATAR_STATES = {
   idle: { emoji: "🙂", caption: "Get ready..." },
@@ -26,32 +26,101 @@ export default function TestPage() {
   const [canRecord, setCanRecord] = useState(false);
   const [canSubmit, setCanSubmit] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
+  // const [skipNotice, setSkipNotice] = useState("");
+  // const skipNoticeTimerRef = useRef(null);
 
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recordingStartTimeRef = useRef(null);
-  const timerIntervalRef = useRef(null);
+  // const mediaRecorderRef = useRef(null);
+  // const audioChunksRef = useRef([]);
+  // const recordingStartTimeRef = useRef(null);
+  // const timerIntervalRef = useRef(null);
 
-  // ---- Start the interview session on mount ----
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await startSession(token);
-        if (cancelled) return;
-        setSessionId(data.session_id);
-        setQuestions(data.questions);
-        setPhase("interview");
-      } catch (err) {
-        if (!cancelled) {
-          setErrorMsg(err.message);
-          setPhase("error");
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // // ---- Start the interview session on mount ----
+  // useEffect(() => {
+  //   let cancelled = false;
+  //   (async () => {
+  //     try {
+  //       const data = await startSession(token);
+  //       if (cancelled) return;
+  //       setSessionId(data.session_id);
+  //       setQuestions(data.questions);
+  //       setPhase("interview");
+  //     } catch (err) {
+  //       if (!cancelled) {
+  //         setErrorMsg(err.message);
+  //         setPhase("error");
+  //       }
+  //     }
+  //   })();
+  //   return () => { cancelled = true; };
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, []);
+
+// const mediaRecorderRef = useRef(null);
+// const audioChunksRef = useRef([]);
+// const recordingStartTimeRef = useRef(null);
+// const timerIntervalRef = useRef(null);
+// const sessionStartedRef = useRef(false);
+
+// // ---- Start the interview session on mount ----
+// useEffect(() => {
+//   // Guard against React 18 StrictMode's intentional dev-mode double-invoke
+//   // of effects (mount -> cleanup -> mount again). Without this, startSession
+//   // - a real POST that creates a DB row - fires twice, leaving one orphaned
+//   // session (never answered, overall_score stays NULL forever) alongside
+//   // the real one for a single candidate attempt.
+//   if (sessionStartedRef.current) return;
+//   sessionStartedRef.current = true;
+
+//   let cancelled = false;
+//   (async () => {
+//     try {
+//       const data = await startSession(token);
+//       if (cancelled) return;
+//       setSessionId(data.session_id);
+//       setQuestions(data.questions);
+//       setPhase("interview");
+//     } catch (err) {
+//       if (!cancelled) {
+//         setErrorMsg(err.message);
+//         setPhase("error");
+//       }
+//     }
+//   })();
+//   return () => { cancelled = true; };
+//   // eslint-disable-next-line react-hooks/exhaustive-deps
+// }, []);
+
+
+const mediaRecorderRef = useRef(null);
+const audioChunksRef = useRef([]);
+const recordingStartTimeRef = useRef(null);
+const timerIntervalRef = useRef(null);
+const sessionStartedRef = useRef(false);
+
+// ---- Start the interview session on mount ----
+useEffect(() => {
+  // Guard against React 18 StrictMode's intentional dev-mode double-invoke
+  // of effects (mount -> cleanup -> mount again). Without this, startSession
+  // - a real POST that creates a DB row - fires twice, leaving one orphaned
+  // session (never answered, overall_score stays NULL forever) alongside
+  // the real one for a single candidate attempt.
+  if (sessionStartedRef.current) return;
+  sessionStartedRef.current = true;
+
+  (async () => {
+    try {
+      const data = await startSession(token);
+      setSessionId(data.session_id);
+      setQuestions(data.questions);
+      setPhase("interview");
+    } catch (err) {
+      setErrorMsg(err.message);
+      setPhase("error");
+    }
+  })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
 
   // ---- Whenever we move to a new question, read it aloud ----
   useEffect(() => {
@@ -190,12 +259,46 @@ export default function TestPage() {
     setCanSubmit(false);
     setAvatarState("idle");
 
+    try {
+      await skipQuestionApi(token, sessionId, questions[currentIndex].question_index);
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+
+    // setSkipNotice("You skipped this question. It will be recorded as skipped.");
+    // clearTimeout(skipNoticeTimerRef.current);
+    // skipNoticeTimerRef.current = setTimeout(() => setSkipNotice(""), 4000);
+
     const nextIndex = currentIndex + 1;
     if (nextIndex < questions.length) {
       setCurrentIndex(nextIndex);
     } else {
-      finishInterview();
+      await finishInterview();
     }
+  }
+
+  async function submitInterviewDirectly() {
+    clearInterval(timerIntervalRef.current);
+
+    if (recording) {
+      await submitCurrentAnswer();
+      return;
+    }
+
+    setRecording(false);
+    setCanRecord(false);
+    setCanSubmit(false);
+    setAvatarState("idle");
+
+    try {
+      await skipQuestionApi(token, sessionId, questions[currentIndex].question_index);
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+
+    await finishInterview();
   }
 
   async function finishInterview() {
@@ -255,6 +358,12 @@ export default function TestPage() {
               <div style={{ color: "#888", fontSize: 13, marginTop: 8 }}>{q.topic}</div>
               <div className="question-text">{q.question_text}</div>
 
+              {/* {skipNotice && (
+                <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "#fff4e5", color: "#663c00", border: "1px solid #ffd8a8" }}>
+                  {skipNotice}
+                </div>
+              )} */}
+
               <div style={{ marginBottom: 10 }}>
                 <button className="btn btn-outline btn-sm" onClick={() => speakQuestion(q.question_text)}>
                   🔊 Replay Question
@@ -277,13 +386,23 @@ export default function TestPage() {
                 >
                   {recording ? "✅ Submit & Next ➜" : "🎙️ Start Answer"}
                 </button>
-                <button
-                  className="btn btn-outline"
-                  disabled={!q}
-                  onClick={skipQuestion}
-                >
-                  Skip Question ➜
-                </button>
+                {currentIndex < questions.length - 1 ? (
+                  <button
+                    className="btn btn-outline"
+                    disabled={!q}
+                    onClick={skipQuestion}
+                  >
+                    Skip Question ➜
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-outline"
+                    disabled={!q}
+                    onClick={submitInterviewDirectly}
+                  >
+                    Submit Interview
+                  </button>
+                )}
               </div>
             </>
           )}
